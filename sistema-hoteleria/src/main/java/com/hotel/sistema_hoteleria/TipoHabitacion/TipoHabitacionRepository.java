@@ -1,6 +1,5 @@
-package com.hotel.sistema_hoteleria.repository;
+package com.hotel.sistema_hoteleria.TipoHabitacion;
 
-import com.hotel.sistema_hoteleria.model.TipoHabitacion;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TipoHabitacionRepository

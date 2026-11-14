@@ -1,4 +1,4 @@
-package com.hotel.sistema_hoteleria.model;
+package com.hotel.sistema_hoteleria.TipoHabitacion;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
