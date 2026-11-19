@@ -2,6 +2,7 @@ package com.hotel.sistema_hoteleria.Huesped;
 
 import com.hotel.sistema_hoteleria.Persona.Persona;
 import com.hotel.sistema_hoteleria.Persona.PersonaRepository;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -131,4 +132,81 @@ public class HuespedController {
 
         return ResponseEntity.noContent().build();
     }
+
+        @PostMapping("/registrar")
+        @Transactional
+        public ResponseEntity<?> registrar(
+                @Valid @RequestBody Persona datos
+        ) {
+        String documento = datos.getDocumento().trim();
+
+        if (personaRepo.existsByDocumentoIgnoreCase(documento)) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(
+                                "Ya existe una persona con ese documento. "
+                                + "Debes vincular su registro existente, "
+                                + "no crear otra persona."
+                        );
+        }
+
+        Persona persona = new Persona();
+        persona.setNombre(datos.getNombre().trim());
+        persona.setApellido(datos.getApellido().trim());
+        persona.setDocumento(documento);
+        persona.setTelefono(datos.getTelefono().trim());
+        persona.setCorreo(datos.getCorreo().trim());
+
+        Persona guardada = personaRepo.save(persona);
+
+        Huesped huesped = new Huesped();
+        huesped.setPersona(guardada);
+
+        Huesped registrado = repo.save(huesped);
+
+        return ResponseEntity
+                .created(
+                        URI.create(
+                                "/api/huespedes/obtener/"
+                                        + registrado.getId()
+                        )
+                )
+                .body(registrado);
+        }
+
+        @PutMapping("/{id}/datos-personales")
+        @Transactional
+        public ResponseEntity<?> actualizarDatosPersonales(
+                @PathVariable("id") Long id,
+                @Valid @RequestBody Persona datos
+        ) {
+        Huesped huesped = repo.findById(id).orElse(null);
+
+        if (huesped == null) {
+                return ResponseEntity.notFound().build();
+        }
+
+        Persona persona = huesped.getPersona();
+        String documento = datos.getDocumento().trim();
+
+        if (personaRepo.existsByDocumentoIgnoreCaseAndIdNot(
+                documento,
+                persona.getId()
+        )) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(
+                                "Ya existe otra persona con el documento: "
+                                        + documento
+                        );
+        }
+
+        persona.setNombre(datos.getNombre().trim());
+        persona.setApellido(datos.getApellido().trim());
+        persona.setDocumento(documento);
+        persona.setTelefono(datos.getTelefono().trim());
+        persona.setCorreo(datos.getCorreo().trim());
+
+        personaRepo.save(persona);
+
+        return ResponseEntity.ok(huesped);
+        }
 }

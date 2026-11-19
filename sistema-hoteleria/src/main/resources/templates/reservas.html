@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Reservas | Sistema Hotelero</title>
+
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <script defer th:src="@{/js/reservas.js}"></script>
+</head>
+
+<body th:attr="data-api-base=@{/api/reservas},
+               data-huespedes-api=@{/api/huespedes}">
+
+<div class="app">
+
+    <aside th:replace="~{fragments/layout :: menu}"></aside>
+
+    <main class="contenido">
+        <header class="encabezado">
+            <div>
+                <p class="ruta">Administración / Reservas</p>
+                <h1>Gestión de reservas</h1>
+                <p class="subtitulo">
+                    Consulta disponibilidad y administra las reservas.
+                </p>
+            </div>
+
+            <button id="btnNueva"
+                    class="btn btn-dorado"
+                    type="button"
+                    disabled>
+                + Nueva reserva
+            </button>
+        </header>
+
+        <div id="mensaje"
+             class="mensaje"
+             role="status"
+             hidden></div>
+
+        <section class="estadisticas" aria-label="Resumen de reservas">
+            <article class="tarjeta">
+                <span>Total de reservas</span>
+                <strong id="totalReservas">—</strong>
+            </article>
+
+            <article class="tarjeta">
+                <span>Pendientes</span>
+                <strong id="pendientes">—</strong>
+            </article>
+
+            <article class="tarjeta">
+                <span>Confirmadas</span>
+                <strong id="confirmadas">—</strong>
+            </article>
+
+            <article class="tarjeta">
+                <span>Canceladas</span>
+                <strong id="canceladas">—</strong>
+            </article>
+        </section>
+
+        <section class="panel-tabla">
+            <div class="herramientas">
+                <div class="busqueda">
+                    <label for="buscar">Buscar reserva</label>
+                    <input id="buscar"
+                           type="search"
+                           placeholder="ID de reserva o habitación...">
+                </div>
+
+                <div class="filtro">
+                    <label for="filtroEstado">Estado</label>
+                    <select id="filtroEstado">
+                        <option value="">Todos los estados</option>
+                        <option value="PENDIENTE">Pendiente</option>
+                        <option value="CONFIRMADA">Confirmada</option>
+                        <option value="CANCELADA">Cancelada</option>
+                        <option value="FINALIZADA">Finalizada</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="tabla-contenedor">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Reserva</th>
+                        <th>Habitación</th>
+                        <th>Entrada</th>
+                        <th>Salida</th>
+                        <th>Noches</th>
+                        <th>Total</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                    </thead>
+
+                    <tbody id="tablaReservas">
+                    <tr>
+                        <td colspan="8" class="tabla-vacia">
+                            Cargando reservas...
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <footer class="tabla-pie">
+                <span id="cantidadResultados" aria-live="polite"></span>
+                <span>Los importes no incluyen un símbolo de moneda.</span>
+            </footer>
+        </section>
+    </main>
+</div>
+
+<dialog id="panelReserva" class="panel-edicion">
+    <div class="panel-cabecera">
+        <div>
+            <p class="ruta">Administración</p>
+            <h2>Nueva reserva</h2>
+        </div>
+
+        <button id="btnCerrar"
+                class="btn-icono"
+                type="button"
+                aria-label="Cerrar formulario">
+            &times;
+        </button>
+    </div>
+
+    <form id="formReserva">
+        <div class="panel-cuerpo">
+
+            <div id="errorFormulario"
+                 class="mensaje error"
+                 role="alert"
+                 hidden></div>
+
+            <div class="campo">
+                <label for="fechaEntrada">Fecha de entrada</label>
+                <input id="fechaEntrada"
+                       name="fechaEntrada"
+                       type="date"
+                       required>
+            </div>
+
+            <div class="campo">
+                <label for="fechaSalida">Fecha de salida</label>
+                <input id="fechaSalida"
+                       name="fechaSalida"
+                       type="date"
+                       required>
+            </div>
+
+            <div class="campo">
+                <button id="btnDisponibilidad"
+                        class="btn btn-secundario"
+                        type="button">
+                    Consultar disponibilidad
+                </button>
+            </div>
+
+            <p id="estadoDisponibilidad"
+               class="nota"
+               aria-live="polite">
+                Selecciona las fechas y consulta disponibilidad.
+            </p>
+
+            <div class="campo">
+                <label for="habitacion">Habitación disponible</label>
+                <select id="habitacion"
+                        name="habitacion"
+                        required
+                        disabled>
+                    <option value="">Consulta disponibilidad primero</option>
+                </select>
+            </div>
+
+            <div class="resumen-tipo">
+                <div>
+                    <span>Noches</span>
+                    <strong id="resumenNoches">—</strong>
+                </div>
+                <div>
+                    <span>Precio por noche</span>
+                    <strong id="resumenPrecio">—</strong>
+                </div>
+                <div>
+                    <span>Capacidad</span>
+                    <strong id="resumenCapacidad">—</strong>
+                </div>
+                <div>
+                    <span>Total estimado</span>
+                    <strong id="resumenTotal">—</strong>
+                </div>
+            </div>
+
+            <div class="campo">
+                <label for="huespedes">Huéspedes</label>
+
+                <select id="huespedes"
+                        name="huespedes"
+                        multiple
+                        size="6"
+                        required
+                        aria-describedby="ayudaHuespedes">
+                </select>
+
+                <small id="ayudaHuespedes">
+                    En computadora, mantén Ctrl —o Cmd en Mac— para
+                    seleccionar varios. Todos compartirán las fechas
+                    de la reserva.
+                </small>
+
+                <small id="contadorHuespedes" aria-live="polite">
+                    0 huéspedes seleccionados.
+                </small>
+            </div>
+
+            <div class="campo">
+                <label for="estado">Estado inicial</label>
+                <select id="estado" name="estado" required>
+                    <option value="PENDIENTE">Pendiente</option>
+                    <option value="CONFIRMADA">Confirmada</option>
+                </select>
+            </div>
+
+            <p class="nota">
+                El servidor vuelve a comprobar disponibilidad, capacidad
+                y total cuando se registra la reserva.
+            </p>
+        </div>
+
+        <div class="panel-pie">
+            <button id="btnCancelar"
+                    class="btn btn-secundario"
+                    type="button">
+                Cerrar
+            </button>
+
+            <button id="btnGuardar"
+                    class="btn btn-dorado"
+                    type="submit"
+                    disabled>
+                Registrar reserva
+            </button>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="panelDetalle" class="panel-edicion">
+    <div class="panel-cabecera">
+        <div>
+            <p class="ruta">Detalle de reserva</p>
+            <h2 id="tituloDetalle">Huéspedes asociados</h2>
+        </div>
+
+        <button id="btnCerrarDetalle"
+                class="btn-icono"
+                type="button"
+                aria-label="Cerrar detalle">
+            &times;
+        </button>
+    </div>
+
+    <div class="panel-cuerpo">
+        <p id="textoDetalle" class="nota" role="status"></p>
+        <div id="listaDetalle"></div>
+    </div>
+</dialog>
+
+</body>
+</html>

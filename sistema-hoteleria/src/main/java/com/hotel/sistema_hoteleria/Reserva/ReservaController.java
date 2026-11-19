@@ -2,6 +2,8 @@ package com.hotel.sistema_hoteleria.Reserva;
 
 import com.hotel.sistema_hoteleria.Habitacion.Habitacion;
 import com.hotel.sistema_hoteleria.Habitacion.HabitacionRepository;
+import com.hotel.sistema_hoteleria.Huesped.Huesped;
+import com.hotel.sistema_hoteleria.Huesped.HuespedRepository;
 import com.hotel.sistema_hoteleria.Pago.PagoRepository;
 import com.hotel.sistema_hoteleria.ReservaHuesped.ReservaHuesped;
 import com.hotel.sistema_hoteleria.ReservaHuesped.ReservaHuespedRepository;
@@ -9,15 +11,23 @@ import com.hotel.sistema_hoteleria.ReservaHuesped.ReservaHuespedRepository;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URI;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Set;
 
 @RestController
@@ -27,6 +37,7 @@ public class ReservaController {
 
     private final ReservaRepository repo;
     private final HabitacionRepository habitacionRepo;
+    private final HuespedRepository huespedRepo;
     private final ReservaHuespedRepository reservaHuespedRepo;
     private final PagoRepository pagoRepo;
 
@@ -36,6 +47,14 @@ public class ReservaController {
             "CANCELADA",
             "FINALIZADA"
     );
+
+    private static final Set<String> ESTADOS_INICIALES = Set.of(
+            "PENDIENTE",
+            "CONFIRMADA"
+    );
+
+    private static final BigDecimal TOTAL_MAXIMO =
+            new BigDecimal("99999999.99");
 
     @GetMapping("/listar")
     public List<Reserva> listar() {
@@ -51,99 +70,271 @@ public class ReservaController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/{id}/huespedes")
+    @Transactional(readOnly = true)
+    public List<ReservaHuesped> obtenerHuespedes(
+            @PathVariable("id") Long id
+    ) {
+        buscarReserva(id);
+        return reservaHuespedRepo.findByReservaId(id);
+    }
+
+    @GetMapping("/disponibles")
+    @Transactional(readOnly = true)
+    public List<HabitacionDisponible> disponibles(
+            @RequestParam("entrada")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate entrada,
+
+            @RequestParam("salida")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate salida
+    ) {
+        validarFechas(entrada, salida);
+
+        long noches = ChronoUnit.DAYS.between(entrada, salida);
+        List<HabitacionDisponible> resultado = new ArrayList<>();
+
+        for (Habitacion habitacion : habitacionRepo.findAll()) {
+            if (habitacion.getEstado()
+                    != Habitacion.Estado.HABILITADA) {
+                continue;
+            }
+
+            if (repo.contarCruces(
+                    habitacion.getId(),
+                    entrada,
+                    salida,
+                    null
+            ) > 0) {
+                continue;
+            }
+
+            BigDecimal precio = obtenerPrecio(habitacion);
+            BigDecimal total = precio.multiply(
+                    BigDecimal.valueOf(noches)
+            ).setScale(2, RoundingMode.HALF_UP);
+
+            // No ofrecer un período cuyo total no cabe en la columna.
+            if (total.compareTo(TOTAL_MAXIMO) > 0) {
+                continue;
+            }
+
+            resultado.add(
+                    new HabitacionDisponible(
+                            habitacion.getId(),
+                            habitacion.getNumero(),
+                            habitacion.getPiso(),
+                            habitacion.getTipoHabitacion().getNombre(),
+                            habitacion.getTipoHabitacion().getCapacidad(),
+                            precio,
+                            noches,
+                            total
+                    )
+            );
+        }
+
+        return resultado;
+    }
+
+    // Ruta existente: crea solo la reserva.
+    // El total recibido del cliente se ignora y se calcula aquí.
     @PostMapping("/crear")
-    public ResponseEntity<?> crear(
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ResponseEntity<Reserva> crear(
             @Valid @RequestBody Reserva datos
     ) {
-        String error = validarDatos(datos);
-
-        if (error != null) {
-            return ResponseEntity.badRequest().body(error);
+        if (datos.getHabitacion() == null
+                || datos.getHabitacion().getId() == null) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Debes indicar el id de la habitación"
+            );
         }
 
-        Long habitacionId = datos.getHabitacion().getId();
+        Reserva guardada = crearReserva(
+                datos.getHabitacion().getId(),
+                datos.getFechaEntrada(),
+                datos.getFechaSalida(),
+                datos.getEstado()
+        );
 
-        Habitacion habitacion = habitacionRepo.findById(habitacionId)
-                .orElse(null);
+        return respuestaCreada(guardada);
+    }
 
-        if (habitacion == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body("No existe una habitación con id: " + habitacionId);
+    // Ruta para el formulario: reserva y huéspedes juntos.
+    @PostMapping("/registrar")
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ResponseEntity<Reserva> registrar(
+            @Valid @RequestBody ReservaRegistro datos
+    ) {
+        validarFechas(
+                datos.fechaEntrada(),
+                datos.fechaSalida()
+        );
+
+        String estado = estadoInicial(datos.estado());
+
+        Set<Long> idsUnicos = new HashSet<>(datos.huespedIds());
+
+        if (idsUnicos.size() != datos.huespedIds().size()) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "No puedes seleccionar dos veces al mismo huésped"
+            );
         }
 
-        String estado = normalizarEstado(datos.getEstado());
+        Habitacion habitacion = buscarHabitacion(
+                datos.habitacionId()
+        );
 
-        if (!"CANCELADA".equals(estado)
-                && existeCruce(
-                        habitacionId,
-                        datos.getFechaEntrada(),
-                        datos.getFechaSalida(),
-                        null
-                )) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body("La habitación ya tiene una reserva en esas fechas");
+        validarCapacidad(habitacion, idsUnicos.size());
+
+        List<Huesped> huespedes =
+                huespedRepo.findAllById(idsUnicos);
+
+        if (huespedes.size() != idsUnicos.size()) {
+            throw error(
+                    HttpStatus.NOT_FOUND,
+                    "Uno o más huéspedes seleccionados no existen"
+            );
         }
 
-        Reserva nueva = new Reserva();
-        nueva.setHabitacion(habitacion);
-        nueva.setFechaEntrada(datos.getFechaEntrada());
-        nueva.setFechaSalida(datos.getFechaSalida());
-        nueva.setEstado(estado);
-        nueva.setTotal(datos.getTotal());
+        Reserva reserva = crearReserva(
+                habitacion.getId(),
+                datos.fechaEntrada(),
+                datos.fechaSalida(),
+                estado
+        );
 
-        Reserva guardada = repo.save(nueva);
+        List<ReservaHuesped> vinculaciones = new ArrayList<>();
 
-        return ResponseEntity
-                .created(
-                        URI.create(
-                                "/api/reservas/obtener/" + guardada.getId()
-                        )
-                )
-                .body(guardada);
+        for (Huesped huesped : huespedes) {
+            ReservaHuesped vinculacion = new ReservaHuesped();
+
+            vinculacion.setReserva(reserva);
+            vinculacion.setHuesped(huesped);
+            vinculacion.setFechaEntrada(datos.fechaEntrada());
+            vinculacion.setFechaSalida(datos.fechaSalida());
+
+            vinculaciones.add(vinculacion);
+        }
+
+        reservaHuespedRepo.saveAll(vinculaciones);
+
+        return respuestaCreada(reserva);
     }
 
     @PutMapping("/actualizar/{id}")
-    public ResponseEntity<?> actualizar(
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ResponseEntity<Reserva> actualizar(
             @PathVariable("id") Long id,
             @Valid @RequestBody Reserva datos
     ) {
-        Reserva existente = repo.findById(id).orElse(null);
+        Reserva existente = buscarReserva(id);
 
-        if (existente == null) {
-            return ResponseEntity.notFound().build();
+        String estadoActual = normalizarEstado(
+                existente.getEstado()
+        );
+
+        if ("CANCELADA".equals(estadoActual)
+                || "FINALIZADA".equals(estadoActual)) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "No puedes modificar una reserva cancelada o finalizada"
+            );
         }
 
-        String error = validarDatos(datos);
+        validarFechas(
+                datos.getFechaEntrada(),
+                datos.getFechaSalida()
+        );
 
-        if (error != null) {
-            return ResponseEntity.badRequest().body(error);
+        if (datos.getHabitacion() == null
+                || datos.getHabitacion().getId() == null) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Debes indicar el id de la habitación"
+            );
         }
 
-        Long habitacionId = datos.getHabitacion().getId();
+        String estadoNuevo = normalizarEstado(datos.getEstado());
 
-        Habitacion habitacion = habitacionRepo.findById(habitacionId)
-                .orElse(null);
-
-        if (habitacion == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body("No existe una habitación con id: " + habitacionId);
+        if (!ESTADOS_VALIDOS.contains(estadoNuevo)) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Estado de reserva no válido"
+            );
         }
 
-        String estado = normalizarEstado(datos.getEstado());
+        boolean cambiaPeriodoOHabitacion =
+                !existente.getHabitacion().getId().equals(
+                        datos.getHabitacion().getId()
+                )
+                || !existente.getFechaEntrada().equals(
+                        datos.getFechaEntrada()
+                )
+                || !existente.getFechaSalida().equals(
+                        datos.getFechaSalida()
+                );
 
-        if (!"CANCELADA".equals(estado)
-                && existeCruce(
-                        habitacionId,
-                        datos.getFechaEntrada(),
-                        datos.getFechaSalida(),
-                        id
-                )) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body("La habitación ya tiene otra reserva en esas fechas");
+        if (cambiaPeriodoOHabitacion
+                && !pagoRepo.findByReservaId(id).isEmpty()) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "No puedes cambiar habitación o fechas "
+                            + "de una reserva con pagos registrados"
+            );
         }
+
+        // Cancelar o finalizar no debe cambiar fechas ni habitación.
+        if (("CANCELADA".equals(estadoNuevo)
+                || "FINALIZADA".equals(estadoNuevo))
+                && cambiaPeriodoOHabitacion) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "Para cancelar o finalizar, conserva "
+                            + "la habitación y las fechas originales"
+            );
+        }
+
+        if ("CANCELADA".equals(estadoNuevo)) {
+            existente.setEstado("CANCELADA");
+            return ResponseEntity.ok(repo.save(existente));
+        }
+
+        if ("FINALIZADA".equals(estadoNuevo)) {
+            if (LocalDate.now().isBefore(existente.getFechaSalida())) {
+                throw error(
+                        HttpStatus.CONFLICT,
+                        "No puedes finalizar antes de la fecha de salida"
+                );
+            }
+
+            existente.setEstado("FINALIZADA");
+            return ResponseEntity.ok(repo.save(existente));
+        }
+
+        Habitacion habitacion = buscarHabitacion(
+                datos.getHabitacion().getId()
+        );
+
+        // Cambiar solo PENDIENTE/CONFIRMADA no recalcula el precio.
+        if (cambiaPeriodoOHabitacion) {
+            validarHabitacionHabilitada(habitacion);
+        }
+
+        validarSinCruces(
+                habitacion.getId(),
+                datos.getFechaEntrada(),
+                datos.getFechaSalida(),
+                id
+        );
 
         List<ReservaHuesped> vinculaciones =
                 reservaHuespedRepo.findByReservaId(id);
+
+        validarCapacidad(habitacion, vinculaciones.size());
 
         for (ReservaHuesped vinculacion : vinculaciones) {
             LocalDate entrada = vinculacion.getFechaEntrada();
@@ -154,47 +345,75 @@ public class ReservaController {
                     || !salida.isAfter(entrada)
                     || entrada.isBefore(datos.getFechaEntrada())
                     || salida.isAfter(datos.getFechaSalida())) {
-
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(
-                                "Las fechas de un huésped quedan fuera "
-                                        + "del período de la reserva. "
-                                        + "Revisa primero sus fechas"
-                        );
+                throw error(
+                        HttpStatus.CONFLICT,
+                        "Las fechas de un huésped quedan fuera "
+                                + "del nuevo período de la reserva"
+                );
             }
+        }
+
+        if (cambiaPeriodoOHabitacion) {
+            existente.setTotal(
+                    calcularTotal(
+                            habitacion,
+                            datos.getFechaEntrada(),
+                            datos.getFechaSalida()
+                    )
+            );
         }
 
         existente.setHabitacion(habitacion);
         existente.setFechaEntrada(datos.getFechaEntrada());
         existente.setFechaSalida(datos.getFechaSalida());
-        existente.setEstado(estado);
-        existente.setTotal(datos.getTotal());
+        existente.setEstado(estadoNuevo);
 
         return ResponseEntity.ok(repo.save(existente));
     }
 
-    @DeleteMapping("/eliminar/{id}")
-    public ResponseEntity<?> eliminar(
+    @PutMapping("/{id}/cancelar")
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ResponseEntity<Reserva> cancelar(
             @PathVariable("id") Long id
     ) {
-        if (!repo.existsById(id)) {
-            return ResponseEntity.notFound().build();
+        Reserva reserva = buscarReserva(id);
+
+        if ("FINALIZADA".equals(
+                normalizarEstado(reserva.getEstado())
+        )) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "No puedes cancelar una reserva finalizada"
+            );
         }
 
+        // Conserva total, huéspedes y pagos como historial.
+        reserva.setEstado("CANCELADA");
+
+        return ResponseEntity.ok(repo.save(reserva));
+    }
+
+    @DeleteMapping("/eliminar/{id}")
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ResponseEntity<Void> eliminar(
+            @PathVariable("id") Long id
+    ) {
+        buscarReserva(id);
+
         if (!reservaHuespedRepo.findByReservaId(id).isEmpty()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(
-                            "No puedes eliminar una reserva "
-                                    + "que tiene huéspedes asociados"
-                    );
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "No puedes eliminar una reserva "
+                            + "que tiene huéspedes asociados"
+            );
         }
 
         if (!pagoRepo.findByReservaId(id).isEmpty()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(
-                            "No puedes eliminar una reserva "
-                                    + "que tiene pagos registrados"
-                    );
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "No puedes eliminar una reserva "
+                            + "que tiene pagos registrados"
+            );
         }
 
         repo.deleteById(id);
@@ -202,77 +421,215 @@ public class ReservaController {
         return ResponseEntity.noContent().build();
     }
 
-    private String validarDatos(Reserva datos) {
-        if (datos.getHabitacion() == null
-                || datos.getHabitacion().getId() == null) {
-            return "Debes indicar el id de la habitación";
-        }
+    private Reserva crearReserva(
+            Long habitacionId,
+            LocalDate entrada,
+            LocalDate salida,
+            String estadoSolicitado
+    ) {
+        validarFechas(entrada, salida);
 
-        if (datos.getFechaEntrada() == null
-                || datos.getFechaSalida() == null) {
-            return "Las fechas de entrada y salida son obligatorias";
-        }
+        String estado = estadoInicial(estadoSolicitado);
 
-        if (!datos.getFechaSalida().isAfter(datos.getFechaEntrada())) {
-            return "La fecha de salida debe ser posterior a la entrada";
-        }
+        Habitacion habitacion = buscarHabitacion(habitacionId);
 
-        if (datos.getEstado() == null
-                || !ESTADOS_VALIDOS.contains(
-                        normalizarEstado(datos.getEstado())
-                )) {
-            return "El estado debe ser PENDIENTE, CONFIRMADA, "
-                    + "CANCELADA o FINALIZADA";
-        }
+        validarHabitacionHabilitada(habitacion);
 
-        if (datos.getTotal() == null) {
-            return "El total es obligatorio";
-        }
+        validarSinCruces(
+                habitacionId,
+                entrada,
+                salida,
+                null
+        );
 
-        if (datos.getTotal().signum() < 0) {
-            return "El total no puede ser negativo";
-        }
+        Reserva reserva = new Reserva();
+        reserva.setHabitacion(habitacion);
+        reserva.setFechaEntrada(entrada);
+        reserva.setFechaSalida(salida);
+        reserva.setEstado(estado);
+        reserva.setTotal(
+                calcularTotal(habitacion, entrada, salida)
+        );
 
-        if (datos.getTotal().stripTrailingZeros().scale() > 2) {
-            return "El total debe tener como máximo dos decimales";
-        }
-
-        if (datos.getTotal().compareTo(
-                new java.math.BigDecimal("99999999.99")
-        ) > 0) {
-            return "El total supera el máximo permitido";
-        }
-
-        return null;
+        return repo.save(reserva);
     }
 
-    private boolean existeCruce(
-            Long habitacionId,
-            LocalDate entradaNueva,
-            LocalDate salidaNueva,
-            Long reservaIdExcluir
+    private Reserva buscarReserva(Long id) {
+        return repo.findById(id)
+                .orElseThrow(() -> error(
+                        HttpStatus.NOT_FOUND,
+                        "No existe una reserva con id: " + id
+                ));
+    }
+
+    private Habitacion buscarHabitacion(Long id) {
+        return habitacionRepo.findById(id)
+                .orElseThrow(() -> error(
+                        HttpStatus.NOT_FOUND,
+                        "No existe una habitación con id: " + id
+                ));
+    }
+
+    private void validarHabitacionHabilitada(
+            Habitacion habitacion
     ) {
-        return repo.findByHabitacionId(habitacionId)
-                .stream()
-                .filter(reserva ->
-                        !Objects.equals(
-                                reserva.getId(),
-                                reservaIdExcluir
-                        )
-                )
-                .filter(reserva ->
-                        !"CANCELADA".equalsIgnoreCase(
-                                reserva.getEstado()
-                        )
-                )
-                .anyMatch(reserva ->
-                        reserva.getFechaEntrada().isBefore(salidaNueva)
-                                && reserva.getFechaSalida()
-                                        .isAfter(entradaNueva)
-                );
+        if (habitacion.getEstado()
+                != Habitacion.Estado.HABILITADA) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "La habitación no está habilitada para reservar"
+            );
+        }
+    }
+
+    private void validarCapacidad(
+            Habitacion habitacion,
+            int cantidad
+    ) {
+        Integer capacidad =
+                habitacion.getTipoHabitacion().getCapacidad();
+
+        if (capacidad == null || capacidad < 1) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "El tipo de habitación no tiene una capacidad válida"
+            );
+        }
+
+        if (cantidad > capacidad) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "La habitación admite como máximo "
+                            + capacidad + " huésped(es)"
+            );
+        }
+    }
+
+    private void validarSinCruces(
+            Long habitacionId,
+            LocalDate entrada,
+            LocalDate salida,
+            Long excluirId
+    ) {
+        if (repo.contarCruces(
+                habitacionId,
+                entrada,
+                salida,
+                excluirId
+        ) > 0) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "La habitación ya tiene una reserva en esas fechas"
+            );
+        }
+    }
+
+    private void validarFechas(
+            LocalDate entrada,
+            LocalDate salida
+    ) {
+        if (entrada == null || salida == null) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Las fechas de entrada y salida son obligatorias"
+            );
+        }
+
+        if (!salida.isAfter(entrada)) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "La fecha de salida debe ser posterior a la entrada"
+            );
+        }
+    }
+
+    private BigDecimal obtenerPrecio(
+            Habitacion habitacion
+    ) {
+        Double precio =
+                habitacion.getTipoHabitacion().getPrecioBase();
+
+        if (precio == null
+                || !Double.isFinite(precio)
+                || precio <= 0) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "El tipo de habitación no tiene un precio válido"
+            );
+        }
+
+        BigDecimal precioRedondeado = BigDecimal.valueOf(precio)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        if (precioRedondeado.signum() <= 0) {
+            throw error(
+                    HttpStatus.CONFLICT,
+                    "El precio por noche debe ser al menos 0.01"
+            );
+        }
+
+        return precioRedondeado;
+    }
+
+    private BigDecimal calcularTotal(
+            Habitacion habitacion,
+            LocalDate entrada,
+            LocalDate salida
+    ) {
+        long noches = ChronoUnit.DAYS.between(entrada, salida);
+
+        BigDecimal total = obtenerPrecio(habitacion)
+                .multiply(BigDecimal.valueOf(noches))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        if (total.compareTo(TOTAL_MAXIMO) > 0) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "El total supera el máximo permitido"
+            );
+        }
+
+        return total;
+    }
+
+    private String estadoInicial(String estado) {
+        String normalizado = estado == null || estado.isBlank()
+                ? "PENDIENTE"
+                : normalizarEstado(estado);
+
+        if (!ESTADOS_INICIALES.contains(normalizado)) {
+            throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Una reserva nueva debe ser PENDIENTE o CONFIRMADA"
+            );
+        }
+
+        return normalizado;
     }
 
     private String normalizarEstado(String estado) {
-        return estado.trim().toUpperCase(Locale.ROOT);
+        return estado == null
+                ? ""
+                : estado.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private ResponseEntity<Reserva> respuestaCreada(
+            Reserva reserva
+    ) {
+        return ResponseEntity
+                .created(
+                        URI.create(
+                                "/api/reservas/obtener/"
+                                        + reserva.getId()
+                        )
+                )
+                .body(reserva);
+    }
+
+    private ResponseStatusException error(
+            HttpStatus estado,
+            String mensaje
+    ) {
+        return new ResponseStatusException(estado, mensaje);
     }
 }

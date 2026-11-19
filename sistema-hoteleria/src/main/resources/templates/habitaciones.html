@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Habitaciones | Sistema Hotelero</title>
+
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <script defer th:src="@{/js/habitaciones.js}"></script>
+</head>
+
+<body th:attr="data-api-base=@{/api/habitaciones}">
+<div class="app">
+
+    <aside th:replace="~{fragments/layout :: menu}"></aside>
+
+    <main class="contenido">
+        <header class="encabezado">
+            <div>
+                <p class="ruta">Administración / Habitaciones</p>
+                <h1>Gestión de habitaciones</h1>
+                <p class="subtitulo">
+                    Administra las habitaciones y su estado operativo.
+                </p>
+            </div>
+
+            <button id="btnNueva" class="btn btn-dorado" type="button">
+                + Nueva habitación
+            </button>
+        </header>
+
+        <div id="mensaje" class="mensaje" role="status" hidden></div>
+
+        <section class="estadisticas" aria-label="Resumen de habitaciones">
+            <article class="tarjeta">
+                <span>Total habitaciones</span>
+                <strong id="total">—</strong>
+            </article>
+
+            <article class="tarjeta">
+                <span>Habilitadas</span>
+                <strong id="habilitadas">—</strong>
+            </article>
+
+            <article class="tarjeta">
+                <span>Mantenimiento</span>
+                <strong id="mantenimiento">—</strong>
+            </article>
+
+            <article class="tarjeta">
+                <span>Inactivas</span>
+                <strong id="inactivas">—</strong>
+            </article>
+        </section>
+
+        <section class="panel-tabla">
+            <div class="herramientas">
+                <div class="busqueda">
+                    <label for="buscar">Buscar habitación</label>
+                    <input
+                        id="buscar"
+                        type="search"
+                        placeholder="Número, tipo o piso..."
+                    >
+                </div>
+
+                <div class="filtro">
+                    <label for="filtroEstado">Estado</label>
+                    <select id="filtroEstado">
+                        <option value="">Todos los estados</option>
+                        <option value="HABILITADA">Habilitada</option>
+                        <option value="MANTENIMIENTO">Mantenimiento</option>
+                        <option value="INACTIVA">Inactiva</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="tabla-contenedor">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Número</th>
+                        <th>Tipo</th>
+                        <th>Piso</th>
+                        <th>Precio base</th>
+                        <th>Capacidad</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                    </thead>
+
+                    <tbody id="tablaHabitaciones">
+                    <tr>
+                        <td colspan="7" class="tabla-vacia">
+                            Cargando habitaciones...
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <footer class="tabla-pie">
+                <span id="cantidadResultados" aria-live="polite"></span>
+                <span>El precio corresponde al tipo de habitación.</span>
+            </footer>
+        </section>
+    </main>
+</div>
+
+<dialog id="panelHabitacion" class="panel-edicion">
+    <div class="panel-cabecera">
+        <div>
+            <p class="ruta">Administración</p>
+            <h2 id="tituloPanel">Nueva habitación</h2>
+        </div>
+
+        <button
+            id="btnCerrar"
+            class="btn-icono"
+            type="button"
+            aria-label="Cerrar formulario"
+        >
+            &times;
+        </button>
+    </div>
+
+    <form id="formHabitacion">
+        <div class="panel-cuerpo">
+            <div id="errorFormulario" class="mensaje error"
+                 role="alert" hidden></div>
+
+            <div class="campo">
+                <label for="numero">Número de habitación</label>
+                <input id="numero" name="numero"
+                       maxlength="10" required
+                       placeholder="Ejemplo: HAB-101">
+            </div>
+
+            <div class="campo">
+                <label for="piso">Piso</label>
+                <input id="piso" name="piso" type="number"
+                       step="1" required placeholder="Ejemplo: 1">
+            </div>
+
+            <div class="campo">
+                <label for="tipoHabitacion">Tipo de habitación</label>
+                <select id="tipoHabitacion" name="tipoHabitacion" required>
+                    <option value="">Selecciona un tipo</option>
+
+                    <option
+                        th:each="tipo : ${tiposHabitacion}"
+                        th:value="${tipo.id}"
+                        th:text="${tipo.nombre}"
+                        th:attr="data-precio=${tipo.precioBase},
+                                 data-capacidad=${tipo.capacidad}">
+                    </option>
+                </select>
+
+                <small th:if="${#lists.isEmpty(tiposHabitacion)}">
+                    Primero debes registrar al menos un tipo de habitación.
+                </small>
+            </div>
+
+            <div class="resumen-tipo">
+                <div>
+                    <span>Precio base</span>
+                    <strong id="precioTipo">—</strong>
+                </div>
+
+                <div>
+                    <span>Capacidad</span>
+                    <strong id="capacidadTipo">—</strong>
+                </div>
+            </div>
+
+            <div class="campo">
+                <label for="estado">Estado operativo</label>
+                <select id="estado" name="estado" required>
+                    <option th:each="estado : ${estados}"
+                            th:value="${estado}"
+                            th:text="${estado}">
+                    </option>
+                </select>
+            </div>
+
+            <p class="nota">
+                Habilitada no significa disponible para cualquier fecha.
+                La disponibilidad dependerá de las reservas.
+            </p>
+        </div>
+
+        <div class="panel-pie">
+            <button id="btnCancelar" class="btn btn-secundario" type="button">
+                Cancelar
+            </button>
+
+            <button id="btnGuardar" class="btn btn-dorado" type="submit">
+                Guardar
+            </button>
+        </div>
+    </form>
+</dialog>
+</body>
+</html>

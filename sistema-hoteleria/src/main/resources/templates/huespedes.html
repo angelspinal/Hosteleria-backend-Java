@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Huéspedes | Sistema Hotelero</title>
+
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <script defer th:src="@{/js/huespedes.js}"></script>
+</head>
+
+<body th:attr="data-api-base=@{/api/huespedes}">
+<div class="app">
+
+    <aside th:replace="~{fragments/layout :: menu}"></aside>
+
+    <main class="contenido">
+        <header class="encabezado">
+            <div>
+                <p class="ruta">Administración / Huéspedes</p>
+                <h1>Gestión de huéspedes</h1>
+                <p class="subtitulo">
+                    Registra y consulta los datos de tus huéspedes.
+                </p>
+            </div>
+
+            <button id="btnNuevo" class="btn btn-dorado" type="button">
+                + Nuevo huésped
+            </button>
+        </header>
+
+        <div id="mensaje" class="mensaje" role="status" hidden></div>
+
+        <section class="estadisticas">
+            <article class="tarjeta">
+                <span>Total de huéspedes</span>
+                <strong id="totalHuespedes">—</strong>
+            </article>
+        </section>
+
+        <section class="panel-tabla">
+            <div class="herramientas">
+                <div class="busqueda">
+                    <label for="buscar">Buscar huésped</label>
+                    <input id="buscar"
+                           type="search"
+                           placeholder="Nombre, apellido o documento...">
+                </div>
+            </div>
+
+            <div class="tabla-contenedor">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Nombre completo</th>
+                        <th>Documento</th>
+                        <th>Teléfono</th>
+                        <th>Correo</th>
+                        <th>Acciones</th>
+                    </tr>
+                    </thead>
+
+                    <tbody id="tablaHuespedes">
+                    <tr>
+                        <td colspan="6" class="tabla-vacia">
+                            Cargando huéspedes...
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <footer class="tabla-pie">
+                <span id="cantidadResultados" aria-live="polite"></span>
+            </footer>
+        </section>
+    </main>
+</div>
+
+<dialog id="panelHuesped" class="panel-edicion">
+    <div class="panel-cabecera">
+        <div>
+            <p class="ruta">Administración</p>
+            <h2 id="tituloPanel">Nuevo huésped</h2>
+        </div>
+
+        <button id="btnCerrar"
+                class="btn-icono"
+                type="button"
+                aria-label="Cerrar formulario">
+            &times;
+        </button>
+    </div>
+
+    <form id="formHuesped">
+        <div class="panel-cuerpo">
+            <div id="errorFormulario"
+                 class="mensaje error"
+                 role="alert"
+                 hidden></div>
+
+            <div class="campo">
+                <label for="nombre">Nombre</label>
+                <input id="nombre" name="nombre"
+                       maxlength="80" autocomplete="given-name" required>
+            </div>
+
+            <div class="campo">
+                <label for="apellido">Apellido</label>
+                <input id="apellido" name="apellido"
+                       maxlength="80" autocomplete="family-name" required>
+            </div>
+
+            <div class="campo">
+                <label for="documento">Documento de identificación</label>
+                <input id="documento" name="documento"
+                       maxlength="30" required>
+            </div>
+
+            <div class="campo">
+                <label for="telefono">Teléfono</label>
+                <input id="telefono" name="telefono" type="tel"
+                       maxlength="25" autocomplete="tel" required>
+            </div>
+
+            <div class="campo">
+                <label for="correo">Correo electrónico</label>
+                <input id="correo" name="correo" type="email"
+                       maxlength="150" autocomplete="email" required>
+            </div>
+        </div>
+
+        <div class="panel-pie">
+            <button id="btnCancelar"
+                    class="btn btn-secundario"
+                    type="button">
+                Cancelar
+            </button>
+
+            <button id="btnGuardar"
+                    class="btn btn-dorado"
+                    type="submit">
+                Registrar huésped
+            </button>
+        </div>
+    </form>
+</dialog>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<aside class="sidebar" th:fragment="menu">
+
+    <div class="marca">
+        <div class="marca-icono">H</div>
+        <strong>Sistema Hotelero</strong>
+        <small>Panel de administración</small>
+    </div>
+
+    <nav class="navegacion" aria-label="Menú principal">
+        <a class="nav-item"
+           data-menu="habitaciones"
+           th:href="@{/habitaciones}">
+            Habitaciones
+        </a>
+
+        <a class="nav-item"
+           data-menu="huespedes"
+           th:href="@{/huespedes}">
+            Huéspedes
+        </a>
+
+        <a class="nav-item"
+           data-menu="reservas"
+           th:href="@{/reservas}">
+            Reservas
+        </a>
+
+        <span class="nav-item pendiente"
+              title="Módulo pendiente de implementar">
+            Pagos
+        </span>
+
+        <span class="nav-item pendiente"
+              title="Módulo pendiente de implementar">
+            Reportes
+        </span>
+    </nav>
+
+    <div class="sidebar-pie">
+        Administración hotelera
+    </div>
+
+</aside>
+
+</body>
+</html>
